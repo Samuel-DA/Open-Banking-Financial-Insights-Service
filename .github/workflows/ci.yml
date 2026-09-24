@@ -1,0 +1,27 @@
+name: ci
+on: { push: { branches: [main] }, pull_request: {} }
+permissions: { contents: read, id-token: write }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.23", cache: true }
+      - run: go test ./...
+      - run: go vet ./...
+      - uses: hadolint/hadolint-action@v3.1.0
+        with: { dockerfile: Dockerfile }
+  build:
+    if: github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: "${{ secrets.AWS_DEPLOY_ROLE }}", aws-region: eu-west-2 }
+      - uses: aws-actions/amazon-ecr-login@v2
+      - run: docker build --build-arg TARGET=api -t "$ECR_REGISTRY/insights-api:${GITHUB_SHA}" .
+        env: { ECR_REGISTRY: "${{ secrets.ECR_REGISTRY }}" }
+      - run: docker push "$ECR_REGISTRY/insights-api:${GITHUB_SHA}"
+        env: { ECR_REGISTRY: "${{ secrets.ECR_REGISTRY }}" }

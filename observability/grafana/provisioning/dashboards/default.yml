@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: Open Banking
+    folder: Open Banking
+    type: file
+    options: { path: /var/lib/grafana/dashboards }

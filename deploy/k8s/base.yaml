@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Namespace
+metadata: { name: open-banking }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: insights-config, namespace: open-banking }
+data:
+  HTTP_ADDRESS: ":8080"
+  KAFKA_BROKERS: "kafka.open-banking.svc:9092"
+  KAFKA_TOPIC: "transaction-ingested"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc:4318"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: insights-api, namespace: open-banking }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: insights-api } }
+  template:
+    metadata: { labels: { app: insights-api } }
+    spec:
+      containers:
+        - name: api
+          image: REPLACE_ECR_IMAGE:latest
+          ports: [{ containerPort: 8080 }]
+          envFrom: [{ configMapRef: { name: insights-config } }, { secretRef: { name: insights-secrets } }]
+          readinessProbe: { httpGet: { path: /health/ready, port: 8080 }, initialDelaySeconds: 5, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /health/live, port: 8080 }, initialDelaySeconds: 10, periodSeconds: 20 }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 256Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: insights-worker, namespace: open-banking }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: insights-worker } }
+  template:
+    metadata: { labels: { app: insights-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: REPLACE_ECR_WORKER_IMAGE:latest
+          envFrom: [{ configMapRef: { name: insights-config } }, { secretRef: { name: insights-secrets } }]
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 256Mi } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, runAsNonRoot: true }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: insights-api, namespace: open-banking }
+spec: { selector: { app: insights-api }, ports: [{ port: 80, targetPort: 8080 }] }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: insights-api, namespace: open-banking }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: insights-api }
+  minReplicas: 2
+  maxReplicas: 8
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }]
